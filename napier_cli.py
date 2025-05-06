@@ -46,6 +46,12 @@ class NapierClient:
         # Conversation history
         self.chat_history = []
         self.connected_server = None
+        
+        # System prompt for Gemini
+        self.system_prompt = """You are a helpful AI assistant in the Napier terminal application.
+You can help users with various tasks and answer questions.
+When you're connected to MCP servers, you can use tools to interact with third-party applications.
+Be concise, helpful, and friendly in your responses."""
     
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -203,6 +209,44 @@ Please analyze this result and provide a helpful response to the user based on t
             console.print(f"[bold red]Error: {str(e)}[/bold red]")
             return f"Error processing query: {str(e)}"
 
+    async def chat_with_gemini(self, query: str) -> str:
+        """Chat directly with Gemini without using MCP tools"""
+        # Add user query to history
+        self.chat_history.append({"role": "user", "parts": [query]})
+        
+        try:
+            # Initialize Gemini chat with system prompt
+            chat = self.model.start_chat(history=self.chat_history)
+            
+            # Send the query with system prompt
+            response = chat.send_message(
+                [self.system_prompt, query],
+                generation_config={"temperature": 0.7}
+            )
+            
+            response_text = response.text
+            self.chat_history.append({"role": "model", "parts": [response_text]})
+            
+            return response_text
+                
+        except Exception as e:
+            console.print(f"[bold red]Error: {str(e)}[/bold red]")
+            return f"Error: {str(e)}"
+            
+    async def list_tools(self):
+        """List available tools from connected MCP servers"""
+        if not self.session:
+            return "Not connected to any MCP server. Use '/connect <path_to_server>' first."
+            
+        response = await self.session.list_tools()
+        tools = response.tools
+        
+        result = "Available MCP Tools:\n\n"
+        for tool in tools:
+            result += f"• {tool.name}: {tool.description}\n"
+            
+        return result
+    
     async def chat_loop(self):
         """Run an interactive chat loop"""
         welcome_message = """
@@ -211,10 +255,13 @@ Please analyze this result and provide a helpful response to the user based on t
         
         Model Context Protocol Client
         
-        Type:
-        • 'connect <path_to_server>' to connect to an MCP server
-        • 'exit' or 'quit' to exit
-        • Any other text to send as a query to the AI
+        Commands:
+        • '/connect <path_to_server>' - Connect to an MCP server
+        • '/tools' - List available MCP tools
+        • '/help' - Show help information
+        • '/exit' or '/quit' - Exit the application
+        
+        Start chatting directly with Napier!
         """
         console.print(Panel(welcome_message, border_style="blue"))
 
@@ -227,30 +274,60 @@ Please analyze this result and provide a helpful response to the user based on t
                     
                 user_input = Prompt.ask(prompt)
                 
-                if user_input.lower() in ['exit', 'quit']:
+                if user_input.lower() in ['/exit', '/quit']:
                     console.print("[yellow]Exiting Napier...[/yellow]")
                     break
                 
-                elif user_input.lower().startswith('connect '):
-                    server_path = user_input[8:].strip()
+                elif user_input.lower().startswith('/connect '):
+                    server_path = user_input[9:].strip()
                     await self.connect_to_server(server_path)
                     
-                elif user_input.lower() == 'help':
+                elif user_input.lower() == '/tools':
+                    tools_info = await self.list_tools()
+                    console.print(Panel(tools_info, title="Available Tools", border_style="green"))
+                    
+                elif user_input.lower() == '/help':
                     help_text = """
                     Available commands:
-                    • 'connect <path_to_server>' - Connect to an MCP server
-                    • 'exit' or 'quit' - Exit the application
-                    • 'help' - Display this help message
-                    • Any other text will be processed as a query to the AI
+                    • '/connect <path_to_server>' - Connect to an MCP server
+                    • '/tools' - List available MCP tools
+                    • '/help' - Display this help message
+                    • '/exit' or '/quit' - Exit the application
+                    
+                    Chat directly with Napier or use MCP tools when connected
+                    • Type normally to chat with Napier
+                    • Type '/use <tool_name>' to specifically use an MCP tool
                     """
                     console.print(Panel(help_text, title="Napier Help", border_style="green"))
                     
-                elif user_input.strip():
+                elif user_input.lower().startswith('/use ') and user_input.strip() != '/use':
                     if not self.session:
-                        console.print("[bold yellow]Not connected to any MCP server. Use 'connect <path_to_server>' first.[/bold yellow]")
+                        console.print("[bold yellow]Not connected to any MCP server. Use '/connect <path_to_server>' first.[/bold yellow]")
                         continue
                         
-                    response = await self.process_query(user_input)
+                    # Extract tool name and query
+                    parts = user_input[5:].strip().split(' ', 1)
+                    if len(parts) < 2:
+                        console.print("[bold yellow]Please provide a query to use with the tool.[/bold yellow]")
+                        continue
+                        
+                    tool_name = parts[0]
+                    query = f"I want to use the '{tool_name}' tool to {parts[1]}"
+                        
+                    response = await self.process_query(query)
+                    console.print(Panel(Markdown(response), title="AI Response", border_style="cyan"))
+                
+                elif user_input.strip() and user_input.startswith('/'):
+                    console.print("[bold yellow]Unknown command. Type '/help' for assistance.[/bold yellow]")
+                
+                elif user_input.strip():
+                    # Check if connected to MCP server and use it if available
+                    if self.session:
+                        response = await self.process_query(user_input)
+                    else:
+                        # Direct chat with Gemini
+                        response = await self.chat_with_gemini(user_input)
+                        
                     console.print(Panel(Markdown(response), title="AI Response", border_style="cyan"))
                     
             except Exception as e:
@@ -273,7 +350,8 @@ async def main():
     ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝
     """
     console.print(Panel(banner, border_style="blue"))
-    console.print("[bold]Napier[/bold] - The MCP Client connecting AI with applications")
+    console.print("[bold]Napier[/bold] - Chat with AI and connect to third-party apps")
+    console.print("Type '/help' for available commands")
     console.print("Version 1.0.0\n")
 
     client = NapierClient()
