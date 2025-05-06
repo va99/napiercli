@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "module": "NodeNext",
+    "rootDir": "src",
+    "outDir": "./lib",
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src",
+  ],
+}
