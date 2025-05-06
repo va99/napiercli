@@ -1,0 +1,6 @@
+/dist
+/bin
+/.go
+/logs
+/vendor
+razorpay-mcp-server
